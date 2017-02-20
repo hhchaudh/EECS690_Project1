@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <mutex>
+#include <thread>
 #include <iostream>
 #include <unordered_set>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include <functional>
 #include <atomic>
 #include "Barrier.h"
+
 
 // The value used to keep track of how many threads (trains) are in the move function
 std::atomic<int> numExpected;
@@ -22,8 +24,10 @@ std::mutex coutMutex;
 // The barrier that will keep all threads synchronized through each timestep
 Barrier aBarrier;
 
+bool ready;
+
 // A flag to to set a barrier on the first run of move()
-bool firstRun = true;
+std::atomic<bool> firstRun;
 
 // Train struct, used as a container for each individual train
 struct Train
@@ -66,10 +70,10 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
     int timeStep = 0;
 
     // We'll compare each path of each train to the tracks contained in aTracks
-    for( int i = 0; i < aTrain.paths.size(); i++ )
+    for( unsigned int i = 0; i < aTrain.paths.size(); i++ )
     {
-        for( int j = 0; j < aTracks.size(); j++ )
-        {   
+        for( unsigned int j = 0; j < aTracks.size(); j++ )
+        {
             // If we find a track that matches the current train path (and this should always happen) then we'll first
             // try to lock the track.  If we can lock the track, that means that the current thread can "move its train".
             // Otherwise, the current thread has to "hold its train".  We break out of the loop after matching because
@@ -97,13 +101,16 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
             }
         }
 
+        if(i < aTrain.paths.size())
+        {
+            std::this_thread::sleep_for (std::chrono::milliseconds(1));
+        }
         // Increment the timestep
         timeStep++;
 
         // Hit the barrier, wait on all threads to complete before moving on
         aBarrier.barrier( numExpected );
     }
-    // If a thread reaches this point, that means that the number of threads expected by the barrier should decrease by one
     numExpected--;
 }
 
@@ -111,20 +118,27 @@ int main(int argc, char* argv[])
 {
     // Open the file to be read
     std::ifstream fileReader;
-    
+
     if( argc > 1 )
     {
         fileReader.open( argv[1] );
         {
             if( !fileReader.is_open() )
             {
-                fileReader.open( "data.txt" );
+                std::cout << "Failed to open file, ending...\n";
+                exit(0);
             }
         }
     }
     else
     {
         fileReader.open( "data.txt" );
+
+        if( !fileReader.is_open() )
+        {
+            std::cout << "Failed to open file, ending...\n";
+            exit(0);
+        }
     }
 
     // The total number of trains
@@ -167,7 +181,6 @@ int main(int argc, char* argv[])
         int nextStation = -1;
         int secondStation = -1;
         int previousStation = -1;
-        int stationIndex = 0;
         int trainSize;
         Train train;
 
@@ -182,7 +195,7 @@ int main(int argc, char* argv[])
             // This loop accomplishes three things:
             //  1. Sets the paths variable for each train by pushing each new path on to the train paths vector
             //  2. Sets the stations variable for each train by pushing each station on to the train stations vector
-            //  3. Stores each unique path that is found into the paths vector, which will be used later to 
+            //  3. Stores each unique path that is found into the paths vector, which will be used later to
             //      store each individual Track.  We have to do this later because each Track has a lock, and
             //      locks are not movable so push_back cannot be used, therefore, we need to know how many
             //      Tracks to create before creating the tracks vector
@@ -260,6 +273,8 @@ int main(int argc, char* argv[])
     // Set the number of expected threads
     numExpected = numTrains;
 
+    firstRun = true;
+    ready = true;
     // Launch the threads, hitting a barrier first to make sure all threads are created before executing
     for( int i = 0; i < numTrains; i++ )
     {
@@ -281,5 +296,3 @@ int main(int argc, char* argv[])
 
     return 0;
 }
-
-
