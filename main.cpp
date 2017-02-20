@@ -63,6 +63,7 @@ struct Track
 // The vector of Tracks is calculated in main(). Each Track in the vector has a unique path.
 void move( Train& aTrain, std::vector<Track>& aTracks )
 {
+    int lockedTrackIndex = -1;
     if( firstRun )
     {
         aBarrier.barrier( numExpected );
@@ -96,11 +97,13 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
             {
                 if( aTracks[j].trackLock.try_lock() )
                 {
+                    // We'll hold on to this index until we hit the barrier, then reset it back to -1
+                    // This insures that no other trains get access to this track during this iteration.
+                    lockedTrackIndex = j;
                     coutMutex.lock();
                     std::cout << "At time step " << timeStep << ": ";
                     std::cout << "Train " << aTrain.name << " is moving from station " << aTrain.stations[i] << " to station " << aTrain.stations[i + 1] << std::endl;
                     coutMutex.unlock();
-                    aTracks[j].trackLock.unlock();
                     break;
                 }
                 else
@@ -126,8 +129,15 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
         timeStep++;
 
         // Hit the barrier, wait on all threads to complete before moving on
+        // We'll reset some flags, and use another barrier to prevent threads from using incorrect flags
         aBarrier.barrier( numExpected );
         changedNumExpected = false;
+        // If a track got locked, we need to unlock it before moving on to the next iteration.
+        if(lockedTrackIndex > -1)
+        {
+            aTracks[lockedTrackIndex].trackLock.unlock();
+        }
+        lockedTrackIndex = -1;
         aBarrier.barrier( numExpected );
     }
 }
