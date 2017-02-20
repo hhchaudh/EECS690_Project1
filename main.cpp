@@ -3,7 +3,6 @@
 // main.cpp for Project 1
 
 #include <vector>
-#include <chrono>
 #include <mutex>
 #include <thread>
 #include <iostream>
@@ -123,7 +122,6 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
             coutMutex.unlock();
         }
 
-        //std::this_thread::sleep_for (std::chrono::microseconds(1));
         // Increment the timestep
         timeStep++;
 
