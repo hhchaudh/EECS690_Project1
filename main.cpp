@@ -1,8 +1,9 @@
 // Haaris Chaudhry
-// February 19, 2007
+// February 19, 2017
 // main.cpp for Project 1
 
 #include <vector>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <iostream>
@@ -14,6 +15,10 @@
 #include <atomic>
 #include "Barrier.h"
 
+std::mutex mtx;
+std::atomic<int> numFinishedThreads;
+std::atomic<bool> changedNumExpected;
+std::mutex numExpectedLock;
 
 // The value used to keep track of how many threads (trains) are in the move function
 std::atomic<int> numExpected;
@@ -23,8 +28,6 @@ std::mutex coutMutex;
 
 // The barrier that will keep all threads synchronized through each timestep
 Barrier aBarrier;
-
-bool ready;
 
 // A flag to to set a barrier on the first run of move()
 std::atomic<bool> firstRun;
@@ -66,12 +69,24 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
         aBarrier.barrier( numExpected );
         firstRun = false;
     }
+
     // Although each train has its own timestep, the timesteps should be in-sync because of the use of a barrier
     int timeStep = 0;
 
     // We'll compare each path of each train to the tracks contained in aTracks
     for( unsigned int i = 0; i < aTrain.paths.size(); i++ )
     {
+        if( numExpectedLock.try_lock() )
+        {
+            if( !changedNumExpected )
+            {
+                numExpected -= numFinishedThreads;
+                numFinishedThreads = 0;
+                changedNumExpected = true;
+            }
+            numExpectedLock.unlock();
+        }
+
         for( unsigned int j = 0; j < aTracks.size(); j++ )
         {
             // If we find a track that matches the current train path (and this should always happen) then we'll first
@@ -101,20 +116,25 @@ void move( Train& aTrain, std::vector<Track>& aTracks )
             }
         }
 
-        if(i < aTrain.paths.size())
+        if( i == ( aTrain.paths.size() - 1 ) )
         {
-            std::this_thread::sleep_for (std::chrono::milliseconds(1));
+            numFinishedThreads++;
+            coutMutex.lock();
+            coutMutex.unlock();
         }
+
+        //std::this_thread::sleep_for (std::chrono::microseconds(1));
         // Increment the timestep
         timeStep++;
 
         // Hit the barrier, wait on all threads to complete before moving on
         aBarrier.barrier( numExpected );
+        changedNumExpected = false;
+        aBarrier.barrier( numExpected );
     }
-    numExpected--;
 }
 
-int main(int argc, char* argv[])
+int main( int argc, char* argv[] )
 {
     // Open the file to be read
     std::ifstream fileReader;
@@ -126,7 +146,7 @@ int main(int argc, char* argv[])
             if( !fileReader.is_open() )
             {
                 std::cout << "Failed to open file, ending...\n";
-                exit(0);
+                exit( 0 );
             }
         }
     }
@@ -137,7 +157,7 @@ int main(int argc, char* argv[])
         if( !fileReader.is_open() )
         {
             std::cout << "Failed to open file, ending...\n";
-            exit(0);
+            exit( 0 );
         }
     }
 
@@ -274,7 +294,9 @@ int main(int argc, char* argv[])
     numExpected = numTrains;
 
     firstRun = true;
-    ready = true;
+    numFinishedThreads = 0;
+    changedNumExpected = false;
+
     // Launch the threads, hitting a barrier first to make sure all threads are created before executing
     for( int i = 0; i < numTrains; i++ )
     {
